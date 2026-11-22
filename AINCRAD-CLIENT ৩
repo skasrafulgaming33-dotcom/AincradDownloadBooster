@@ -1,0 +1,150 @@
+
+(() => {
+  "use strict";
+
+  if (window.__AINCRAD_ARMED__) {
+    alert("Aincrad Booster is already running!");
+    return;
+  }
+
+  window.__AINCRAD_ARMED__ = true;
+
+  const CHUNK = 4 * 1024 * 1024;
+
+  function status(message) {
+    let box = document.getElementById("aincrad-status");
+
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "aincrad-status";
+
+      Object.assign(box.style, {
+        position: "fixed",
+        zIndex: "2147483647",
+        bottom: "12px",
+        left: "10px",
+        right: "10px",
+        padding: "15px",
+        background: "#172235",
+        color: "white",
+        borderRadius: "12px",
+        font: "14px system-ui",
+        whiteSpace: "pre-wrap"
+      });
+
+      document.body.appendChild(box);
+    }
+
+    box.textContent = "⚡ AINCRAD BOOSTER\n" + message;
+  }
+
+  async function download(url) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: "Aincrad-Download.bin"
+      });
+
+      status("Checking server support...");
+
+      const test = await fetch(url, {
+        headers: { Range: "bytes=0-0" }
+      });
+
+      const cr = test.headers.get("Content-Range");
+      const match = cr && cr.match(/^bytes 0-0\/(\d+)$/i);
+
+      await test.body?.cancel();
+
+      if (test.status !== 206 || !match) {
+        throw Error("Server does not support accessible byte ranges.");
+      }
+
+      const total = Number(match[1]);
+      const count = Math.ceil(total / CHUNK);
+      const parts = 3;
+
+      const file = await handle.createWritable();
+      let next = 0;
+      let completed = 0;
+
+      async function worker() {
+        while (true) {
+          const i = next++;
+          if (i >= count) return;
+
+          const start = i * CHUNK;
+          const end = Math.min(total - 1, start + CHUNK - 1);
+
+          const response = await fetch(url, {
+            headers: {
+              Range: `bytes=${start}-${end}`
+            }
+          });
+
+          if (response.status !== 206) {
+            throw Error("Range request failed.");
+          }
+
+          const data = await response.arrayBuffer();
+
+          if (data.byteLength !== end - start + 1) {
+            throw Error("Invalid downloaded part.");
+          }
+
+          await file.write({
+            type: "write",
+            position: start,
+            data
+          });
+
+          completed += data.byteLength;
+
+          status(
+            "Downloading...\n" +
+            (completed / 1048576).toFixed(2) +
+            " / " +
+            (total / 1048576).toFixed(2) +
+            " MB\n" +
+            (completed / total * 100).toFixed(1) +
+            "% complete"
+          );
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: parts }, worker)
+      );
+
+      await file.close();
+
+      status("Download completed successfully!");
+
+    } catch (error) {
+      status("Download failed:\n" + error.message);
+    }
+  }
+
+  document.addEventListener("click", function(event) {
+    const link = event.target.closest("a[href]");
+
+    if (!link) return;
+
+    const url = link.href;
+
+    if (!/^https?:/i.test(url)) return;
+
+    if (!confirm("Use Aincrad Download Booster?")) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    download(url);
+
+  }, true);
+
+  status(
+    "Booster activated!\n" +
+    "Click a supported direct download link."
+  );
+
+})();
